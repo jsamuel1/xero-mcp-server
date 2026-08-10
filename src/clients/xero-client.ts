@@ -8,16 +8,16 @@ const bearer_token = process.env.XERO_CLIENT_BEARER_TOKEN;
 const redirect_uri = process.env.XERO_REDIRECT_URI;
 const grant_type = "client_credentials";
 
-// Validation: at minimum we need client_id+secret, a bearer token, or a redirect_uri flow
-if (!bearer_token && !redirect_uri && (!client_id || !client_secret)) {
+// Validation: need at minimum client_id+secret OR a bearer token
+if (!bearer_token && (!client_id || !client_secret)) {
   throw Error(
     "Environment Variables not set - please check your .env file. " +
-    "Set XERO_CLIENT_ID + XERO_CLIENT_SECRET (+ optionally XERO_REDIRECT_URI for OAuth2 Web App flow), " +
-    "or set XERO_CLIENT_BEARER_TOKEN."
+      "Set XERO_CLIENT_ID + XERO_CLIENT_SECRET (add XERO_REDIRECT_URI for free OAuth2 Web App flow), " +
+      "or set XERO_CLIENT_BEARER_TOKEN."
   );
 }
 
-// Scopes for Custom Connections (client_credentials)
+// Scopes for Custom Connections (client_credentials grant)
 const SCOPES_V1 = [
   "accounting.transactions",
   "accounting.contacts",
@@ -52,7 +52,6 @@ const customScopes = process.env.XERO_SCOPES;
 
 export abstract class MCPXeroClient extends XeroClient {
   public tenantId: string;
-  private shortCode: string;
 
   constructor(config: {
     clientId: string;
@@ -64,20 +63,19 @@ export abstract class MCPXeroClient extends XeroClient {
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       grantType: config.grantType,
-      scopes: config.scopes.split(" "),
+      scopes: config.scopes ? config.scopes.split(" ") : [],
       httpTimeout: 30000,
       state: true,
     });
     this.tenantId = "";
-    this.shortCode = "";
   }
 
   abstract authenticate(): Promise<void>;
 }
 
 class CustomConnectionsXeroClient extends MCPXeroClient {
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+  private readonly _clientId: string;
+  private readonly _clientSecret: string;
 
   constructor(config: { clientId: string; clientSecret: string }) {
     const scopes = customScopes || SCOPES_V1;
@@ -87,19 +85,20 @@ class CustomConnectionsXeroClient extends MCPXeroClient {
       grantType: grant_type,
       scopes,
     });
-    this.clientId = config.clientId;
-    this.clientSecret = config.clientSecret;
+    this._clientId = config.clientId;
+    this._clientSecret = config.clientSecret;
   }
 
   async authenticate(): Promise<void> {
-    const scopes = customScopes || SCOPES_V1;
     try {
-      await this.getClientCredentialsToken(scopes.split(" "));
+      await this.getClientCredentialsToken();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("invalid_scope") && !customScopes) {
         // Fall back to V2 granular scopes
-        await this.getClientCredentialsToken(SCOPES_V2.split(" "));
+        // Reinitialise with V2 scopes and retry
+        (this as unknown as { config: { scopes: string[] } }).config.scopes = SCOPES_V2.split(" ");
+        await this.getClientCredentialsToken();
       } else {
         throw err;
       }
@@ -136,9 +135,9 @@ class BearerTokenXeroClient extends MCPXeroClient {
 }
 
 // Singleton selection:
-// 1. XERO_CLIENT_BEARER_TOKEN → BearerTokenXeroClient
-// 2. XERO_REDIRECT_URI set    → OAuth2WebXeroClient (free Web App flow)
-// 3. XERO_CLIENT_ID + SECRET  → CustomConnectionsXeroClient (paid Custom Connection)
+// 1. XERO_CLIENT_BEARER_TOKEN  → BearerTokenXeroClient
+// 2. XERO_REDIRECT_URI set     → OAuth2WebXeroClient (free Web App flow)
+// 3. XERO_CLIENT_ID + SECRET   → CustomConnectionsXeroClient (paid Custom Connection)
 export type XeroMCPClient = MCPXeroClient | OAuth2WebXeroClient;
 
 let xeroClientInstance: XeroMCPClient;
