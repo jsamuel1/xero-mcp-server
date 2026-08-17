@@ -67,7 +67,7 @@ Add the following to your MCP client config (e.g. `claude_desktop_config.json`):
   "mcpServers": {
     "xero": {
       "command": "npx",
-      "args": ["-y", "@xeroapi/xero-mcp-server@latest"],
+      "args": ["-y", "github:jsamuel1/xero-mcp-server#feature/oauth2-web-app"],
       "env": {
         "XERO_CLIENT_ID": "your_client_id_here",
         "XERO_CLIENT_SECRET": "your_client_secret_here",
@@ -124,7 +124,7 @@ Custom connections require different scopes depending on when they were created:
 
 ---
 
-### Mode 3: Bearer Token
+### Mode 3: [REDACTED_TOKEN]
 
 Use a pre-obtained bearer token. Suitable for testing or when you manage token acquisition externally.
 
