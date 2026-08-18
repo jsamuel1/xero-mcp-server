@@ -149,17 +149,17 @@ function waitForAuthCode(
 export class OAuth2WebXeroClient extends XeroClient {
   public tenantId: string = "";
   private readonly clientId: string;
-  private readonly clientSecret=[REDACTED_PASSWORD]
+  private readonly clientSecret: string;
   private readonly redirectUri: string;
 
   constructor(config: {
     clientId: string;
-    clientSecret=[REDACTED_PASSWORD]
+    clientSecret: string;
     redirectUri: string;
   }) {
     super({
       clientId: config.clientId,
-      clientSecret=[REDACTED_PASSWORD]
+      clientSecret: config.clientSecret,
       redirectUris: [config.redirectUri],
       scopes: OAUTH2_SCOPES.split(" "),
       grantType: "authorization_code",
@@ -167,7 +167,7 @@ export class OAuth2WebXeroClient extends XeroClient {
       state: true,
     });
     this.clientId = config.clientId;
-    this.clientSecret=[REDACTED_PASSWORD]
+    this.clientSecret = config.clientSecret;
     this.redirectUri = config.redirectUri;
   }
 
@@ -246,6 +246,7 @@ export class OAuth2WebXeroClient extends XeroClient {
     const code = await codePromise;
     console.error("[xero-mcp] Auth code received, exchanging for tokens...");
 
+    // Build the full callback URL so xero-node can exchange the code
     const callbackUrl = `${this.redirectUri}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
     const tokenSet: TokenSet = await this.apiCallback(callbackUrl, { code_verifier: codeVerifier });
 
