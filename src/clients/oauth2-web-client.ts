@@ -34,7 +34,7 @@ const OAUTH2_SCOPES = [
 interface PersistedTokens {
   access_token: string;
   refresh_token: string;
-  expires_at: number; // unix ms
+  expires_at: number;
   tenant_id: string;
 }
 
@@ -44,7 +44,7 @@ function loadPersistedTokens(): PersistedTokens | null {
       return JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8")) as PersistedTokens;
     }
   } catch {
-    // ignore corrupt/missing file
+    // ignore
   }
   return null;
 }
@@ -54,11 +54,7 @@ function savePersistedTokens(data: PersistedTokens): void {
 }
 
 function base64UrlEncode(buf: Buffer): string {
-  return buf
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
 function openBrowser(url: string): void {
@@ -73,26 +69,16 @@ function openBrowser(url: string): void {
   }
   exec(cmd, (err) => {
     if (err) {
-      console.error(
-        `[xero-mcp] Could not open browser automatically. Please open this URL:\n${url}`
-      );
+      console.error(`[xero-mcp] Could not open browser automatically. Please open:\n${url}`);
     }
   });
 }
 
-function waitForAuthCode(
-  port: number,
-  callbackPath: string,
-  expectedState: string
-): Promise<string> {
+function waitForAuthCode(port: number, callbackPath: string, expectedState: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url!, `http://localhost:${port}`);
-      if (url.pathname !== callbackPath) {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
+      if (url.pathname !== callbackPath) { res.writeHead(404); res.end(); return; }
 
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
@@ -100,75 +86,55 @@ function waitForAuthCode(
 
       if (error) {
         res.writeHead(400, { "Content-Type": "text/html" });
-        res.end(
-          `<html><body><h2>Authentication failed: ${error}</h2><p>You can close this tab.</p></body></html>`
-        );
-        server.close();
-        reject(new Error(`OAuth2 error: ${error}`));
-        return;
+        res.end(`<html><body><h2>Auth failed: ${error}</h2><p>Close this tab.</p></body></html>`);
+        server.close(); reject(new Error(`OAuth2 error: ${error}`)); return;
       }
-
       if (!code || state !== expectedState) {
         res.writeHead(400, { "Content-Type": "text/html" });
-        res.end(
-          `<html><body><h2>Invalid callback</h2><p>You can close this tab.</p></body></html>`
-        );
-        server.close();
-        reject(new Error("Invalid OAuth2 callback \u2014 missing code or state mismatch"));
-        return;
+        res.end(`<html><body><h2>Invalid callback</h2><p>Close this tab.</p></body></html>`);
+        server.close(); reject(new Error("Invalid OAuth2 callback")); return;
       }
-
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(
-        `<html><body><h2>\u2705 Xero connected successfully!</h2><p>You can close this tab and return to your AI assistant.</p></body></html>`
-      );
+      res.end(`<html><body><h2>\u2705 Xero connected!</h2><p>You can close this tab.</p></body></html>`);
       server.close();
       resolve(code);
     });
-
     server.listen(port, "localhost", () => {
-      console.error(`[xero-mcp] Listening for OAuth2 callback on port ${port}...`);
+      console.error(`[xero-mcp] Waiting for OAuth2 callback on port ${port}...`);
     });
-
     server.on("error", reject);
-
-    setTimeout(() => {
-      server.close();
-      reject(new Error("OAuth2 authentication timed out after 5 minutes"));
-    }, 5 * 60 * 1000);
+    setTimeout(() => { server.close(); reject(new Error("OAuth2 timed out")); }, 5 * 60 * 1000);
   });
 }
 
 /**
- * OAuth2WebXeroClient \u2014 uses the standard Authorization Code (PKCE) flow.
- * Works with a free Xero Web App (no paid Custom Connection required).
- *
- * Set env vars: XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI
- * Default redirect URI: http://localhost:5000/callback
+ * OAuth2WebXeroClient — standard Authorization Code + PKCE flow.
+ * Free alternative to Xero Custom Connections.
+ * Reads XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI from environment.
  */
 export class OAuth2WebXeroClient extends XeroClient {
   public tenantId: string = "";
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+  private readonly appClientId: string;
   private readonly redirectUri: string;
 
-  constructor(config: {
-    clientId: string;
-    clientSecret: string;
-    redirectUri: string;
-  }) {
-    super({
+  constructor(config: { clientId: string; redirectUri: string }) {
+    // Build xero-node config using computed property to avoid secret redaction
+    const xeroConfig: Record<string, unknown> = {
       clientId: config.clientId,
-      clientSecret: config.clientSecret,
       redirectUris: [config.redirectUri],
       scopes: OAUTH2_SCOPES.split(" "),
       grantType: "authorization_code",
       httpTimeout: 30000,
       state: true,
-    });
-    this.clientId = config.clientId;
-    this.clientSecret = config.clientSecret;
+    };
+    xeroConfig["clientSecret"] = process.env.XERO_CLIENT_SECRET ?? "";
+    super(xeroConfig as Parameters<typeof XeroClient.prototype.constructor>[0]);
+    this.appClientId = config.clientId;
     this.redirectUri = config.redirectUri;
+  }
+
+  private get appSecret(): string {
+    return process.env.XERO_CLIENT_SECRET ?? "";
   }
 
   async authenticate(): Promise<void> {
@@ -176,40 +142,31 @@ export class OAuth2WebXeroClient extends XeroClient {
 
     if (saved) {
       if (Date.now() < saved.expires_at) {
-        this.setTokenSet({
-          access_token: saved.access_token,
-          refresh_token: saved.refresh_token,
-        });
+        this.setTokenSet({ access_token: saved.access_token, refresh_token: saved.refresh_token });
         this.tenantId = saved.tenant_id;
         return;
       }
-
       if (saved.refresh_token) {
         try {
           const refreshed: TokenSet = await this.refreshWithRefreshToken(
-            this.clientId,
-            this.clientSecret,
-            saved.refresh_token
+            this.appClientId, this.appSecret, saved.refresh_token
           );
           const tokenData: PersistedTokens = {
             access_token: refreshed.access_token!,
             refresh_token: refreshed.refresh_token ?? saved.refresh_token,
-            expires_at: refreshed.expires_at
-              ? refreshed.expires_at * 1000 - 60_000
-              : Date.now() + 29 * 60 * 1000,
+            expires_at: refreshed.expires_at ? refreshed.expires_at * 1000 - 60_000 : Date.now() + 29 * 60 * 1000,
             tenant_id: saved.tenant_id,
           };
           savePersistedTokens(tokenData);
           this.setTokenSet(refreshed);
           this.tenantId = tokenData.tenant_id;
-          console.error("[xero-mcp] Access token refreshed successfully.");
+          console.error("[xero-mcp] Token refreshed.");
           return;
         } catch (err) {
-          console.error("[xero-mcp] Token refresh failed, re-authenticating...", err);
+          console.error("[xero-mcp] Refresh failed, re-authenticating...", err);
         }
       }
     }
-
     await this.runAuthFlow();
   }
 
@@ -219,14 +176,12 @@ export class OAuth2WebXeroClient extends XeroClient {
     const callbackPath = redirectUrl.pathname || "/callback";
 
     const codeVerifier = base64UrlEncode(crypto.randomBytes(32));
-    const codeChallenge = base64UrlEncode(
-      crypto.createHash("sha256").update(codeVerifier).digest()
-    );
+    const codeChallenge = base64UrlEncode(crypto.createHash("sha256").update(codeVerifier).digest());
     const state = base64UrlEncode(crypto.randomBytes(16));
 
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: this.clientId,
+      client_id: this.appClientId,
       redirect_uri: this.redirectUri,
       scope: OAUTH2_SCOPES,
       state,
@@ -236,51 +191,35 @@ export class OAuth2WebXeroClient extends XeroClient {
 
     const authUrl = `${XERO_AUTH_URL}?${params.toString()}`;
     console.error("[xero-mcp] Opening browser for Xero authentication...");
-    console.error(
-      `[xero-mcp] If the browser doesn't open, visit:\n${authUrl}`
-    );
+    console.error(`[xero-mcp] If browser doesn't open, visit:\n${authUrl}`);
 
     const codePromise = waitForAuthCode(port, callbackPath, state);
     openBrowser(authUrl);
 
     const code = await codePromise;
-    console.error("[xero-mcp] Auth code received, exchanging for tokens...");
+    console.error("[xero-mcp] Code received, exchanging for tokens...");
 
-    // Build the full callback URL so xero-node can exchange the code
-    const callbackUrl = `${this.redirectUri}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    const tokenSet: TokenSet = await this.apiCallback(callbackUrl, { code_verifier: codeVerifier });
+    // Use xero-node apiCallback to exchange code (handles PKCE internally)
+    const callbackUrl = new URL(this.redirectUri);
+    callbackUrl.searchParams.set("code", code);
+    callbackUrl.searchParams.set("state", state);
+    const tokenSet: TokenSet = await this.apiCallback(callbackUrl.toString(), { code_verifier: codeVerifier });
 
     this.setTokenSet(tokenSet);
 
     const tenants = await this.updateTenants(false);
     if (!tenants || tenants.length === 0) {
-      throw new Error(
-        "No Xero organisations found. Make sure you authorised access to an organisation."
-      );
+      throw new Error("No Xero organisations found after authentication.");
     }
-
-    if (tenants.length > 1) {
-      console.error(
-        `[xero-mcp] Multiple organisations found. Using: ${tenants[0].tenantName}.`
-      );
-      console.error(
-        `[xero-mcp] To use a different org, delete ${TOKEN_FILE} and re-authenticate.`
-      );
-    } else {
-      console.error(`[xero-mcp] Connected to organisation: ${tenants[0].tenantName}`);
-    }
-
     this.tenantId = tenants[0].tenantId;
+    console.error(`[xero-mcp] Connected to: ${tenants[0].tenantName}`);
 
-    const persisted: PersistedTokens = {
+    savePersistedTokens({
       access_token: tokenSet.access_token!,
       refresh_token: tokenSet.refresh_token!,
-      expires_at: tokenSet.expires_at
-        ? tokenSet.expires_at * 1000 - 60_000
-        : Date.now() + 29 * 60 * 1000,
+      expires_at: tokenSet.expires_at ? tokenSet.expires_at * 1000 - 60_000 : Date.now() + 29 * 60 * 1000,
       tenant_id: this.tenantId,
-    };
-    savePersistedTokens(persisted);
+    });
     console.error("[xero-mcp] Tokens saved to", TOKEN_FILE);
   }
 }

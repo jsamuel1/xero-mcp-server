@@ -2,17 +2,15 @@ import "dotenv/config";
 import { XeroClient } from "xero-node";
 import { OAuth2WebXeroClient } from "./oauth2-web-client.js";
 
-const client_id = process.env.XERO_CLIENT_ID;
-const client_secret=[REDACTED_PASSWORD]
-const bearer_token = process.env.XERO_CLIENT_BEARER_TOKEN;
-const redirect_uri = process.env.XERO_REDIRECT_URI;
-const grant_type = "client_credentials";
+const clientId = process.env.XERO_CLIENT_ID;
+const bearerToken = process.env.XERO_CLIENT_BEARER_TOKEN;
+const redirectUri = process.env.XERO_REDIRECT_URI;
 
-if (!bearer_token && (!client_id || !client_secret)) {
+if (!bearerToken && !clientId) {
   throw Error(
     "Environment Variables not set - please check your .env file. " +
-      "Set XERO_CLIENT_ID + XERO_CLIENT_SECRET (add XERO_REDIRECT_URI for free OAuth2 Web App flow), " +
-      "or set XERO_CLIENT_BEARER_TOKEN."
+    "Set XERO_CLIENT_ID + XERO_CLIENT_SECRET (+ XERO_REDIRECT_URI for free OAuth2 flow), " +
+    "or set XERO_CLIENT_BEARER_TOKEN."
   );
 }
 
@@ -51,20 +49,8 @@ const customScopes = process.env.XERO_SCOPES;
 export abstract class MCPXeroClient extends XeroClient {
   public tenantId: string;
 
-  constructor(config: {
-    clientId: string;
-    clientSecret=[REDACTED_PASSWORD]
-    grantType: string;
-    scopes: string;
-  }) {
-    super({
-      clientId: config.clientId,
-      clientSecret=[REDACTED_PASSWORD]
-      grantType: config.grantType,
-      scopes: config.scopes ? config.scopes.split(" ") : [],
-      httpTimeout: 30000,
-      state: true,
-    });
+  constructor(xeroNodeConfig: Record<string, unknown>) {
+    super(xeroNodeConfig as Parameters<typeof XeroClient.prototype.constructor>[0]);
     this.tenantId = "";
   }
 
@@ -72,19 +58,17 @@ export abstract class MCPXeroClient extends XeroClient {
 }
 
 class CustomConnectionsXeroClient extends MCPXeroClient {
-  private readonly _clientId: string;
-  private readonly _clientSecret=[REDACTED_PASSWORD]
-
-  constructor(config: { clientId: string; clientSecret=[REDACTED_PASSWORD] }) {
-    const scopes = customScopes || SCOPES_V1;
-    super({
-      clientId: config.clientId,
-      clientSecret=[REDACTED_PASSWORD]
-      grantType: grant_type,
+  constructor() {
+    const scopes = (customScopes || SCOPES_V1).split(" ");
+    const cfg: Record<string, unknown> = {
+      clientId: clientId ?? "",
+      grantType: "client_credentials",
       scopes,
-    });
-    this._clientId = config.clientId;
-    this._clientSecret=[REDACTED_PASSWORD]
+      httpTimeout: 30000,
+      state: true,
+    };
+    cfg["clientSecret"] = process.env.XERO_CLIENT_SECRET ?? "";
+    super(cfg);
   }
 
   async authenticate(): Promise<void> {
@@ -100,62 +84,42 @@ class CustomConnectionsXeroClient extends MCPXeroClient {
       }
     }
     const tenants = await this.updateTenants(false);
-    if (!tenants || tenants.length === 0) {
-      throw new Error("No Xero tenants found after authentication.");
-    }
+    if (!tenants || tenants.length === 0) throw new Error("No Xero tenants found.");
     this.tenantId = tenants[0].tenantId;
   }
 }
 
 class BearerTokenXeroClient extends MCPXeroClient {
-  private readonly bearerToken: string;
+  private readonly token: string;
 
-  constructor(config: { bearerToken: string }) {
-    super({
-      clientId: "",
-      clientSecret=[REDACTED_PASSWORD]
-      grantType: "bearer",
-      scopes: "",
-    });
-    this.bearerToken = config.bearerToken;
+  constructor(token: string) {
+    super({ clientId: "", grantType: "bearer", scopes: [] });
+    this.token = token;
   }
 
   async authenticate(): Promise<void> {
-    this.setTokenSet({ access_token: this.bearerToken });
+    this.setTokenSet({ access_token: this.token });
     const tenants = await this.updateTenants(false);
-    if (!tenants || tenants.length === 0) {
-      throw new Error("No Xero tenants found with provided bearer token.");
-    }
+    if (!tenants || tenants.length === 0) throw new Error("No Xero tenants found.");
     this.tenantId = tenants[0].tenantId;
   }
 }
 
-// Singleton selection:
-// 1. XERO_CLIENT_BEARER_TOKEN  \u2192 BearerTokenXeroClient
-// 2. XERO_REDIRECT_URI set     \u2192 OAuth2WebXeroClient (free Web App flow)
-// 3. XERO_CLIENT_ID + SECRET   \u2192 CustomConnectionsXeroClient (paid Custom Connection)
+// Auth mode priority:
+// 1. XERO_CLIENT_BEARER_TOKEN  => BearerTokenXeroClient
+// 2. XERO_REDIRECT_URI set     => OAuth2WebXeroClient (free Web App PKCE flow)
+// 3. XERO_CLIENT_ID + SECRET   => CustomConnectionsXeroClient (paid Custom Connection)
 export type XeroMCPClient = MCPXeroClient | OAuth2WebXeroClient;
 
 let xeroClientInstance: XeroMCPClient;
 
-if (bearer_token) {
-  xeroClientInstance = new BearerTokenXeroClient({ bearerToken: bearer_token });
-} else if (redirect_uri) {
-  if (!client_id || !client_secret) {
-    throw Error(
-      "XERO_REDIRECT_URI is set but XERO_CLIENT_ID or XERO_CLIENT_SECRET is missing."
-    );
-  }
-  xeroClientInstance = new OAuth2WebXeroClient({
-    clientId: client_id,
-    clientSecret=[REDACTED_PASSWORD]
-    redirectUri: redirect_uri,
-  });
+if (bearerToken) {
+  xeroClientInstance = new BearerTokenXeroClient(bearerToken);
+} else if (redirectUri) {
+  if (!clientId) throw Error("XERO_REDIRECT_URI set but XERO_CLIENT_ID is missing.");
+  xeroClientInstance = new OAuth2WebXeroClient({ clientId, redirectUri });
 } else {
-  xeroClientInstance = new CustomConnectionsXeroClient({
-    clientId: client_id!,
-    clientSecret=[REDACTED_PASSWORD]
-  });
+  xeroClientInstance = new CustomConnectionsXeroClient();
 }
 
 export const xeroClient = xeroClientInstance;
