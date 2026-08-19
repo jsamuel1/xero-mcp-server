@@ -1,12 +1,12 @@
 {
   "name": "@jsamuel1/xero-mcp-server",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "A MCP server for Xero (fork of @xeroapi/xero-mcp-server with OAuth2 Web App support)",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "prepare": "tsc",
-    "postinstall": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs');const f='dist/index.js';const c=fs.readFileSync(f,'utf8');if(!c.startsWith('#!/usr/bin/env node'))fs.writeFileSync(f,'#!/usr/bin/env node\\n'+c);fs.chmodSync(f,'755');\"",
+    "prepare": "npm run build",
+    "postinstall": "npm run build",
     "start": "node dist/index.js",
     "test": "vitest"
   },
