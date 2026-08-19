@@ -15,8 +15,8 @@ This is a Model Context Protocol (MCP) server implementation for Xero. It provid
 
 ## Prerequisites
 
-- Node.js (v18 or higher)
-- npm or pnpm
+- Node.js (v24 or higher)
+- npm
 - A Xero developer account with API credentials
 
 ## Docs and Links
@@ -67,7 +67,7 @@ Add the following to your MCP client config (e.g. `claude_desktop_config.json`):
   "mcpServers": {
     "xero": {
       "command": "npx",
-      "args": ["-y", "github:jsamuel1/xero-mcp-server#feature/oauth2-web-app"],
+      "args": ["-y", "@jsamuel1/xero-mcp-server"],
       "env": {
         "XERO_CLIENT_ID": "your_client_id_here",
         "XERO_CLIENT_SECRET": "your_client_secret_here",
@@ -77,8 +77,6 @@ Add the following to your MCP client config (e.g. `claude_desktop_config.json`):
   }
 }
 ```
-
-> **Note:** If you use Node Version Manager (nvm), replace `"npx"` with the full path, e.g. `~/.nvm/versions/node/v22.14.0/bin/npx`
 
 #### Step 3: Authorize
 
@@ -112,7 +110,7 @@ Custom connections require different scopes depending on when they were created:
   "mcpServers": {
     "xero": {
       "command": "npx",
-      "args": ["-y", "@xeroapi/xero-mcp-server@latest"],
+      "args": ["-y", "@jsamuel1/xero-mcp-server"],
       "env": {
         "XERO_CLIENT_ID": "your_client_id_here",
         "XERO_CLIENT_SECRET": "your_client_secret_here"
@@ -124,7 +122,7 @@ Custom connections require different scopes depending on when they were created:
 
 ---
 
-### Mode 3: [REDACTED_TOKEN]
+### Mode 3: Bearer Token
 
 Use a pre-obtained bearer token. Suitable for testing or when you manage token acquisition externally.
 
@@ -133,7 +131,7 @@ Use a pre-obtained bearer token. Suitable for testing or when you manage token a
   "mcpServers": {
     "xero": {
       "command": "npx",
-      "args": ["-y", "@xeroapi/xero-mcp-server@latest"],
+      "args": ["-y", "@jsamuel1/xero-mcp-server"],
       "env": {
         "XERO_CLIENT_BEARER_TOKEN": "your_bearer_token"
       }
@@ -219,11 +217,7 @@ Use a pre-obtained bearer token. Suitable for testing or when you manage token a
 ### Installation
 
 ```bash
-# Using npm
 npm install
-
-# Using pnpm
-pnpm install
 ```
 
 ### Building
